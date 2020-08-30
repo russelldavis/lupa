@@ -21,6 +21,7 @@ from cpython.method cimport (
     PyMethod_Check, PyMethod_GET_SELF, PyMethod_GET_FUNCTION)
 from cpython.version cimport PY_MAJOR_VERSION
 from cpython.bytes cimport PyBytes_FromFormat
+from cpython.pycapsule cimport PyCapsule_GetPointer
 
 #from libc.stdint cimport uintptr_t
 cdef extern from *:
@@ -214,10 +215,17 @@ cdef class LuaRuntime:
     def __cinit__(self, encoding='UTF-8', source_encoding=None,
                   attribute_filter=None, attribute_handlers=None,
                   bint register_eval=True, bint unpack_returned_tuples=False,
-                  bint register_builtins=True):
-        cdef lua_State* L = lua.luaL_newstate()
-        if L is NULL:
-            raise LuaError("Failed to initialise Lua runtime")
+                  bint register_builtins=True, state=None):
+        cdef lua_State* L
+        if state is None:
+            L = lua.luaL_newstate()
+            if L is NULL:
+                raise LuaError("Failed to initialise Lua runtime")
+        else:
+            L = <lua_State *>PyCapsule_GetPointer(state, "lua_State *")
+            if L is NULL:
+                raise LuaError("state arg must be a PyCapsule with name 'lua_State'")
+
         self._state = L
         self._lock = FastRLock()
         self._pyrefs_in_lua = {}
@@ -244,10 +252,12 @@ cdef class LuaRuntime:
                 raise ValueError("attribute_filter and attribute_handlers are mutually exclusive")
             self._attribute_getter, self._attribute_setter = getter, setter
 
-        lua.luaL_openlibs(L)
+        if state is None:
+            lua.luaL_openlibs(L)
+            lua.lua_atpanic(L, <lua.lua_CFunction>1)
+
         self.init_python_lib(register_eval, register_builtins)
         lua.lua_settop(L, 0)
-        lua.lua_atpanic(L, <lua.lua_CFunction>1)
 
     def __dealloc__(self):
         if self._state is not NULL:
